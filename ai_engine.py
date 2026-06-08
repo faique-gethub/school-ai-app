@@ -26,16 +26,38 @@ def load_books(school_id: str):
 
 def get_answer(question: str, school_id: str):
     docs = load_books(school_id)
+
+    # Agar books nahi hain to general AI answer do
     if not docs:
-        return "No books uploaded for this school yet."
+        try:
+            response = client.chat.completions.create(
+                model="llama-3.3-70b-versatile",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are a helpful AI assistant."
+                    },
+                    {
+                        "role": "user",
+                        "content": question
+                    }
+                ]
+            )
+            return response.choices[0].message.content
+        except Exception as e:
+            return f"Error: {str(e)}"
+
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=500,
         chunk_overlap=50
     )
+
     chunks = splitter.split_documents(docs)
     db = Chroma.from_documents(chunks, embeddings)
+
     results = db.similarity_search(question, k=3)
     context = "\n".join([r.page_content for r in results])
+
     try:
         response = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
@@ -50,6 +72,8 @@ def get_answer(question: str, school_id: str):
                 }
             ]
         )
+
         return response.choices[0].message.content
+
     except Exception as e:
         return f"Error: {str(e)}"
