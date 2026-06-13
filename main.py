@@ -1,5 +1,6 @@
 import os
 import urllib.parse
+import base64
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -76,32 +77,41 @@ def ask(req: AskRequest):
     if is_image and not req.file_base64:
         # Use Gemini for image generation
         try:
-            model = genai.GenerativeModel('gemini-2.0-flash-exp-image-generation')
+            model = genai.GenerativeModel('gemini-3.1-flash-image')
             response = model.generate_content(
-                f"Generate an image: {req.prompt}",
+                f"Generate an image: {req.question}",
                 generation_config={"response_modalities": ["TEXT", "IMAGE"]}
             )
             
             # Extract image from response
-            image_url = None
+            image_data = None
             for part in response.parts:
                 if hasattr(part, 'inline_data') and part.inline_data:
-                    image_url = f"data:image/png;base64,{part.inline_data.data}"
+                    image_data = part.inline_data.data
                     break
             
-            if not image_url:
+            if image_data:
+                image_url = f"data:image/png;base64,{base64.b64encode(image_data).decode()}"
+                save_chat(req.student_email, req.school_id, req.question, image_url)
+                return {
+                    "success": True,
+                    "question": req.question,
+                    "answer": "__IMAGE__:" + image_url,
+                    "messages_used": count + 1,
+                    "messages_remaining": DAILY_LIMIT - count - 1
+                }
+            else:
                 # Fallback to Pollinations
                 encoded = urllib.parse.quote(req.question)
                 image_url = f"https://image.pollinations.ai/prompt/{encoded}?width=512&height=512&nologo=true"
-            
-            save_chat(req.student_email, req.school_id, req.question, image_url)
-            return {
-                "success": True,
-                "question": req.question,
-                "answer": "__IMAGE__:" + image_url,
-                "messages_used": count + 1,
-                "messages_remaining": DAILY_LIMIT - count - 1
-            }
+                save_chat(req.student_email, req.school_id, req.question, image_url)
+                return {
+                    "success": True,
+                    "question": req.question,
+                    "answer": "__IMAGE__:" + image_url,
+                    "messages_used": count + 1,
+                    "messages_remaining": DAILY_LIMIT - count - 1
+                }
         except Exception as e:
             # Fallback to Pollinations
             encoded = urllib.parse.quote(req.question)
@@ -147,7 +157,7 @@ def generate_image(req: ImageRequest):
 
     try:
         # Use Gemini for image generation
-        model = genai.GenerativeModel('gemini-2.0-flash-exp-image-generation')
+        model = genai.GenerativeModel('gemini-3.1-flash-image')
         response = model.generate_content(
             f"Generate a detailed image: {req.prompt}",
             generation_config={"response_modalities": ["TEXT", "IMAGE"]}
@@ -161,7 +171,6 @@ def generate_image(req: ImageRequest):
                 break
         
         if image_data:
-            import base64
             image_url = f"data:image/png;base64,{base64.b64encode(image_data).decode()}"
             save_chat(req.student_email, "default", f"[Image] {req.prompt}", image_url)
             return {
