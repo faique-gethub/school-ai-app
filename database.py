@@ -1,12 +1,16 @@
 import os
-from supabase import create_client
+from dotenv import load_dotenv
+from supabase import create_client, Client
 
-url = os.getenv("SUPABASE_URL")
-key = os.getenv("SUPABASE_KEY")
+load_dotenv()
 
-supabase = create_client(url, key)
+supabase: Client = create_client(
+    os.getenv("SUPABASE_URL"),
+    os.getenv("SUPABASE_KEY")
+)
 
-def save_chat(student_email, school_id, question, answer):
+
+def save_chat(student_email: str, school_id: str, question: str, answer: str):
     try:
         supabase.table("chat_history").insert({
             "student_email": student_email,
@@ -14,25 +18,38 @@ def save_chat(student_email, school_id, question, answer):
             "question": question,
             "answer": answer
         }).execute()
-        return True
     except Exception as e:
-        print(f"Error: {e}")
-        return False
+        print(f"Error saving chat: {e}")
 
-def get_chat_history(student_email):
+
+def get_chat_history(student_email: str, limit: int = 50):
     try:
-        result = supabase.table("chat_history").select("*").eq(
-            "student_email", student_email
-        ).execute()
-        return result.data
+        response = (
+            supabase.table("chat_history")
+            .select("*")
+            .eq("student_email", student_email)
+            .order("created_at", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return response.data
     except Exception as e:
+        print(f"Error fetching history: {e}")
         return []
 
-def check_school_active(school_id):
+
+def get_message_count_today(student_email: str):
+    from datetime import datetime, timezone
     try:
-        result = supabase.table("schools").select("*").eq(
-            "school_id", school_id
-        ).eq("is_active", True).execute()
-        return len(result.data) > 0
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        response = (
+            supabase.table("chat_history")
+            .select("id")
+            .eq("student_email", student_email)
+            .gte("created_at", f"{today}T00:00:00")
+            .execute()
+        )
+        return len(response.data)
     except Exception as e:
-        return False
+        print(f"Error counting messages: {e}")
+        return 0

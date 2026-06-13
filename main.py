@@ -1,42 +1,57 @@
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from dotenv import load_dotenv
-from ai_engine import get_answer
-from database import save_chat, get_chat_history, check_school_active
-import os
-
-load_dotenv()
-
-app = FastAPI()
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-class Question(BaseModel):
-    question: str
-    school_id: str
-    student_email: str
-
-@app.get("/")
-def home():
-    return {"message": "School AI App is running!"}
+IMAGE_KEYWORDS = [
+    'generate image', 'draw', 'create image', 'make image',
+    'image of', 'picture of', 'show image', 'banao image', 'tasveer'
+]
 
 @app.post("/ask")
-def ask_question(data: Question):
-    answer = get_answer(data.question, data.school_id)
-    save_chat(data.student_email, data.school_id, data.question, answer)
-    return {
-        "question": data.question,
-        "school_id": data.school_id,
-        "answer": answer
-    }
+def ask(req: AskRequest):
+    if not req.question.strip():
+        raise HTTPException(status_code=400, detail="Question cannot be empty")
 
-@app.get("/history/{student_email}")
-def chat_history(student_email: str):
-    history = get_chat_history(student_email)
-    return {"history": history}
+    count = get_message_count_today(req.student_email)
+    if count >= DAILY_LIMIT:
+        raise HTTPException(status_code=429,
+            detail="Daily limit reached.")
+
+    # Image request check karo seedha yahan
+    lower_q = req.question.lower()
+    is_image = any(k in lower_q for k in IMAGE_KEYWORDS)
+
+    if is_image and not req.file_base64:
+        encoded = urllib.parse.quote(req.question)
+        image_url = (
+            f"https://image.pollinations.ai/prompt/{encoded}"
+            f"?width=512&height=512&nologo=true"
+        )
+        save_chat(req.student_email, req.school_id, req.question, image_url)
+        return {
+            "success": True,
+            "question": req.question,
+            "answer": "__IMAGE__:" + image_url,
+            "messages_used": count + 1,
+            "messages_remaining": DAILY_LIMIT - count - 1
+        }
+
+    history_raw = get_chat_history(req.student_email, limit=6)
+    chat_history = list(reversed(history_raw))
+
+    if req.file_base64 and req.file_type:
+        answer = get_answer_with_file(
+            question=req.question,
+            file_base64=req.file_base64,
+            file_type=req.file_type,
+            file_name=req.file_name or "file",
+            chat_history=chat_history
+        )
+    else:
+        answer = get_answer(req.question, chat_history)
+
+    save_chat(req.student_email, req.school_id, req.question, answer)
+
+    return {
+        "success": True,
+        "question": req.question,
+        "answer": answer,
+        "messages_used": count + 1,
+        "messages_remaining": DAILY_LIMIT - count - 1
+    }

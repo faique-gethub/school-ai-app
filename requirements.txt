@@ -2,8 +2,14 @@ fastapi
 uvicorn
 langchain
 langchain-community
+langchain-text-splitters
 groq
 pypdf
 chromadb
 supabase
 python-dotenv
+google-generativeai
+sentence-transformers
+openai
+httpx
+pillow
